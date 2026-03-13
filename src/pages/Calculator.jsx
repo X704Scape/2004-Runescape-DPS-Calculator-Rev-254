@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
+import { resolveAttackType } from '../components/weaponStyles';
 import LoadoutPanel from '../components/Loadout/LoadoutPanel';
 import MonsterSelect from '../components/Monster/MonsterSelect';
 import ResultsPanel from '../components/Results/ResultsPanel';
@@ -194,16 +195,9 @@ export default function Calculator() {
       let attackBonus = 0;
       let weaponAttackType = 'stab'; // default
       if (detectedCombatType === 'melee') {
-        // Find the active style from weapon's attackStyles
-        const activeStyle = weapon?.attackStyles?.find(s => s.id === playerStats.style);
-        if (activeStyle) {
-          weaponAttackType = activeStyle.type; // 'stab', 'slash', or 'crush'
-          attackBonus = getTotalBonus(weaponAttackType);
-        } else {
-          // Fallback to stab if no style found
-          attackBonus = getTotalBonus('stab');
-          weaponAttackType = 'stab';
-        }
+        // Use resolveAttackType which checks category-based styles first (handles aggressive_2 etc.)
+        weaponAttackType = resolveAttackType(weapon, playerStats.style);
+        attackBonus = getTotalBonus(weaponAttackType);
       } else if (detectedCombatType === 'ranged') {
         attackBonus = getTotalBonus('ranged');
       } else if (detectedCombatType === 'magic') {
@@ -296,9 +290,16 @@ export default function Calculator() {
         monsterDefenceCrush: targetStats.defenceCrush,
         monsterDefenceRanged: targetStats.defenceRanged,
         monsterDefenceMagic: targetStats.defenceMagic,
-        spellMaxHit: (playerStats.selectedSpell?.requiresCharge && playerStats.chargeActive) ? 30 : (playerStats.selectedSpell?.maxHit || 0),
-        hasChaosGauntlets: false,
-        isBoltSpell: false
+        spellMaxHit: (() => {
+          const spell = playerStats.selectedSpell;
+          if (!spell) return 0;
+          if (spell.requiresCharge && playerStats.chargeActive) return 30;
+          const hasChaosGauntlets = equipment.hands?.name?.toLowerCase().includes('chaos gauntlets');
+          return spell.maxHit + (spell.isBolt && hasChaosGauntlets ? 3 : 0);
+        })(),
+        hasChaosGauntlets: equipment.hands?.name?.toLowerCase().includes('chaos gauntlets') || false,
+        isBoltSpell: playerStats.selectedSpell?.isBolt || false,
+        weaponName: equipment.weapon?.name || ''
       });
     } catch (error) {
       console.error('Calculation failed:', error);
@@ -441,6 +442,11 @@ export default function Calculator() {
       <div className="text-center py-6 mt-12 border-t border-amber-900">
         <p className="text-amber-700 text-xs">2004 RuneScape DPS Calculator • Data from LostHQ</p>
         <p className="text-amber-800 text-xs mt-1">All formulas and data are pulled directly from the 2004 Lost City project. Credit to the LC Development team.</p>
+        <div className="flex justify-center gap-3 mt-3">
+          <a href="https://github.com/X704Scape/2004-Runescape-DPS-Calculator-Rev-254/tree/main" target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 border border-amber-900 rounded text-amber-600 text-xs transition">⌨ Source Code</a>
+          <a href="https://2004.losthq.rs/" target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 border border-amber-900 rounded text-amber-600 text-xs transition">📦 LostHQ</a>
+          <a href="https://2004.lostcity.rs/" target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 border border-amber-900 rounded text-amber-600 text-xs transition">⚔️ Play Lost City</a>
+        </div>
       </div>
     </div>
   );
