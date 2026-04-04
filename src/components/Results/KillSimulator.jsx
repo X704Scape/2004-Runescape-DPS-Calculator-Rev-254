@@ -106,7 +106,9 @@ function runMonteCarlo(npcCount, npcHp, maxHit, accuracy, attackSpeedTicks, base
   };
 }
 
+
 export default function KillSimulator({ loadouts, selectedMonster, npcCount, onNpcCountChange }) {
+  const [showComparison, setShowComparison] = useState(false);
 
   const hasResults = loadouts?.some(l => l.results);
   if (!hasResults || !selectedMonster || selectedMonster.id === 'pvp') return null;
@@ -114,7 +116,6 @@ export default function KillSimulator({ loadouts, selectedMonster, npcCount, onN
   const npcHp = selectedMonster.hitpoints || 1;
 
   const simResults = useMemo(() => {
-    // Use a fixed base seed so identical stats always produce identical results
     const BASE_SEED = 42;
     return loadouts.map(loadout => {
       const r = loadout.results;
@@ -122,32 +123,62 @@ export default function KillSimulator({ loadouts, selectedMonster, npcCount, onN
       const maxHit = r.maxHit;
       const accuracy = parseFloat(r.accuracy) / 100;
       const speedTicks = r.attackSpeedTicks || 4;
-      // Seed derived from the actual stats so same stats → same seed → same numbers
       const statSeed = (maxHit * 10000 + Math.round(accuracy * 10000) * 100 + speedTicks) ^ BASE_SEED;
       return runMonteCarlo(npcCount, npcHp, maxHit, accuracy, speedTicks, statSeed);
     });
   }, [loadouts.map(l => JSON.stringify(l.results)).join(','), npcCount, npcHp]);
 
+  // Multi-count comparison: for each preset count, which loadout is fastest?
+  const comparisonData = useMemo(() => {
+    if (!showComparison) return null;
+    const BASE_SEED = 42;
+    return [1, 10, 100, 1000, 10000].map(count => {
+      const results = loadouts.map(loadout => {
+        const r = loadout.results;
+        if (!r) return null;
+        const maxHit = r.maxHit;
+        const accuracy = parseFloat(r.accuracy) / 100;
+        const speedTicks = r.attackSpeedTicks || 4;
+        const statSeed = (maxHit * 10000 + Math.round(accuracy * 10000) * 100 + speedTicks) ^ BASE_SEED;
+        return runMonteCarlo(count, npcHp, maxHit, accuracy, speedTicks, statSeed);
+      });
+      // Find best (lowest time)
+      let bestIdx = -1, bestTime = Infinity;
+      results.forEach((r, i) => {
+        if (r && parseFloat(r.totalSeconds) < bestTime) {
+          bestTime = parseFloat(r.totalSeconds);
+          bestIdx = i;
+        }
+      });
+      return { count, results, bestIdx };
+    });
+  }, [showComparison, loadouts.map(l => JSON.stringify(l.results)).join(','), npcHp]);
+
   return (
     <div className="bg-gray-800 border-2 border-amber-900 rounded overflow-hidden mt-4">
-      <div className="bg-gray-900 border-b-2 border-amber-900 p-3 flex items-center justify-between">
+      <div className="bg-gray-900 border-b-2 border-amber-900 p-3 flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-amber-600 font-bold text-sm">Kill Simulator</h2>
         <div className="flex items-center gap-2">
           <label className="text-amber-700 text-xs">NPCs to kill:</label>
           <input
             type="number"
             min={1}
-            max={10000}
+            max={100000}
             value={npcCount}
-            onChange={e => onNpcCountChange && onNpcCountChange(Math.max(1, Math.min(10000, parseInt(e.target.value) || 1)))}
-            className="w-20 text-xs px-2 py-1 rounded border border-amber-900 bg-gray-900 text-amber-100 text-center"
+            onChange={e => onNpcCountChange && onNpcCountChange(Math.max(1, Math.min(100000, parseInt(e.target.value) || 1)))}
+            className="w-24 text-xs px-2 py-1 rounded border border-amber-900 bg-gray-900 text-amber-100 text-center"
           />
         </div>
       </div>
 
-      <div className="p-3 text-xs text-amber-700 border-b border-amber-900 bg-gray-900/50">
-        Simulates killing {npcCount}× <span className="text-amber-400 font-semibold">{selectedMonster.name}</span> ({npcHp} HP).
-        Weapon attack rate is fixed — no speed bonus between kills. Results averaged over {RUNS.toLocaleString()} runs.
+      <div className="p-3 text-xs text-amber-700 border-b border-amber-900 bg-gray-900/50 flex items-center justify-between flex-wrap gap-2">
+        <span>Simulates killing {npcCount.toLocaleString()}× <span className="text-amber-400 font-semibold">{selectedMonster.name}</span> ({npcHp} HP). Averaged over {RUNS.toLocaleString()} runs.</span>
+        <button
+          onClick={() => setShowComparison(v => !v)}
+          className="px-2 py-1 rounded border border-amber-800 bg-gray-800 text-amber-500 hover:text-amber-300 hover:border-amber-600 text-xs transition"
+        >
+          {showComparison ? 'Hide' : 'Show'} Scale Comparison
+        </button>
       </div>
 
       <div className="overflow-x-auto">
@@ -214,6 +245,51 @@ export default function KillSimulator({ loadouts, selectedMonster, npcCount, onN
           </tbody>
         </table>
       </div>
+
+      {showComparison && comparisonData && (
+        <div className="border-t-2 border-amber-900">
+          <div className="bg-gray-900 px-4 py-2 text-amber-600 text-xs font-bold border-b border-amber-900">
+            Scale Comparison — Best loadout at each NPC count (by total time)
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-gray-900 border-b border-amber-900">
+                  <th className="text-left px-4 py-2 text-amber-600 font-semibold border-r border-amber-900">NPC Count</th>
+                  {loadouts.map((l, idx) => (
+                    <th key={l.id} className={`px-4 py-2 text-amber-600 font-semibold text-center ${idx < loadouts.length - 1 ? 'border-r border-amber-900' : ''}`}>
+                      {l.name}
+                    </th>
+                  ))}
+                  <th className="px-4 py-2 text-amber-600 font-semibold text-center">Winner</th>
+                </tr>
+              </thead>
+              <tbody>
+                {comparisonData.map(({ count, results, bestIdx }) => (
+                  <tr key={count} className="border-b border-amber-900/50">
+                    <td className="px-4 py-2 text-amber-400 font-semibold border-r border-amber-900">{count.toLocaleString()}×</td>
+                    {results.map((sim, idx) => (
+                      <td
+                        key={idx}
+                        className={`px-4 py-2 text-center font-mono ${idx === bestIdx ? 'text-green-400 font-bold' : 'text-amber-200'} ${idx < results.length - 1 ? 'border-r border-amber-900' : ''}`}
+                      >
+                        {sim ? `${sim.totalSeconds}s` : '-'}
+                        {idx === bestIdx && sim && <span className="ml-1 text-green-500">✓</span>}
+                      </td>
+                    ))}
+                    <td className="px-4 py-2 text-center text-green-400 font-semibold">
+                      {bestIdx >= 0 ? loadouts[bestIdx]?.name : '-'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="p-2 text-amber-800 text-xs bg-gray-900/50">
+            Lower time = better. A faster weapon per-hit may lose at low HP targets due to higher overkill damage waste.
+          </div>
+        </div>
+      )}
 
     </div>
   );

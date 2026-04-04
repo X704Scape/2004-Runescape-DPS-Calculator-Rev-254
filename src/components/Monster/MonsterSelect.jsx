@@ -2,36 +2,52 @@ import React, { useEffect, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Search } from 'lucide-react';
 
-export default function MonsterSelect({ selectedMonster, onMonsterChange }) {
-  const [monsters, setMonsters] = React.useState([]);
-  const [loading, setLoading] = React.useState(true);
+// Module-level cache so data is only fetched once per session
+let monstersCache = null;
+let monstersFetchPromise = null;
+
+export default function MonsterSelect({ selectedMonster, onMonsterChange, onMonstersLoaded }) {
+  const [monsters, setMonsters] = React.useState(monstersCache || []);
+  const [loading, setLoading] = React.useState(!monstersCache);
   const [searchTerm, setSearchTerm] = React.useState('');
   const [showDropdown, setShowDropdown] = React.useState(false);
 
   useEffect(() => {
-    const loadMonsters = async () => {
-      try {
-        const response = await base44.functions.invoke('fetchGameData', { type: 'monsters' });
-        console.log('Full response:', response);
-        console.log('Response data:', response.data);
-        console.log('Monsters array:', response.data?.monsters);
-        console.log('Monsters count:', response.data?.monsters?.length);
-        setMonsters(response.data?.monsters || []);
-      } catch (error) {
-        console.error('Failed to load monsters:', error);
-        console.error('Error details:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadMonsters();
+    if (monstersCache) {
+      if (onMonstersLoaded) onMonstersLoaded(monstersCache);
+      return;
+    }
+    if (!monstersFetchPromise) {
+      monstersFetchPromise = base44.functions.invoke('fetchGameData', { type: 'monsters' })
+        .then(r => r.data?.monsters || []);
+    }
+    monstersFetchPromise.then(loaded => {
+      monstersCache = loaded;
+      setMonsters(loaded);
+      if (onMonstersLoaded) onMonstersLoaded(loaded);
+    }).catch(e => {
+      console.error('Failed to load monsters:', e);
+    }).finally(() => setLoading(false));
   }, []);
 
-  const filteredMonsters = monsters.filter(m => {
-    const nameMatch = m.name.toLowerCase().includes(searchTerm.toLowerCase());
-    const idMatch = String(m.id).toLowerCase().includes(searchTerm.toLowerCase());
-    return nameMatch || idMatch;
-  });
+  const filteredMonsters = monsters
+    .filter(m => {
+      const nameMatch = m.name.toLowerCase().includes(searchTerm.toLowerCase());
+      const idMatch = String(m.id).toLowerCase().includes(searchTerm.toLowerCase());
+      return nameMatch || idMatch;
+    })
+    .sort((a, b) => {
+      const term = searchTerm.toLowerCase();
+      const aExact = a.name.toLowerCase() === term;
+      const bExact = b.name.toLowerCase() === term;
+      if (aExact && !bExact) return -1;
+      if (!aExact && bExact) return 1;
+      const aStarts = a.name.toLowerCase().startsWith(term);
+      const bStarts = b.name.toLowerCase().startsWith(term);
+      if (aStarts && !bStarts) return -1;
+      if (!aStarts && bStarts) return 1;
+      return a.name.localeCompare(b.name);
+    });
 
   return (
     <div className="bg-gray-800 border-2 border-amber-900 rounded p-4">

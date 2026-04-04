@@ -5,6 +5,7 @@ import LoadoutPanel from '../components/Loadout/LoadoutPanel';
 import MonsterSelect from '../components/Monster/MonsterSelect';
 import ResultsPanel from '../components/Results/ResultsPanel';
 import KillSimulatorGraph from '../components/Results/KillSimulatorGraph';
+import AIChatModal from '../components/Optimizer/AIChatModal';
 
 const calculateCombatLevel = (stats) => {
   const base = 10 * (stats.defence + stats.hitpoints + Math.floor(stats.prayer / 2));
@@ -40,12 +41,14 @@ export default function Calculator() {
   ]);
   const [activeLoadoutId, setActiveLoadoutId] = useState(1);
   const [selectedMonster, setSelectedMonster] = useState(null);
+  const [availableMonsters, setAvailableMonsters] = useState([]);
   const [calculating, setCalculating] = useState(false);
   const [npcCount, setNpcCount] = useState(10);
+  const [showOptimizer, setShowOptimizer] = useState(false);
 
   const addLoadout = () => {
     const newId = Math.max(...loadouts.map(l => l.id)) + 1;
-    setLoadouts([...loadouts, {
+    setLoadouts(prev => [...prev, {
       id: newId,
       name: `Loadout ${newId}`,
       equipment: {},
@@ -66,6 +69,7 @@ export default function Calculator() {
       },
       results: null
     }]);
+    return newId;
   };
 
   const removeLoadout = (id) => {
@@ -90,6 +94,17 @@ export default function Calculator() {
         return updated;
       }
       return l;
+    }));
+  };
+
+  const applyOptimizerResult = (equipment, combatType, style, targetLoadoutId, playerStatsOverride) => {
+    const targetId = targetLoadoutId ?? activeLoadoutId;
+    setLoadouts(prev => prev.map(l => {
+      if (l.id !== targetId) return l;
+      const mergedStats = playerStatsOverride
+        ? { ...l.playerStats, ...playerStatsOverride, style, combatType }
+        : { ...l.playerStats, style, combatType };
+      return { ...l, equipment, playerStats: mergedStats };
     }));
   };
 
@@ -162,8 +177,6 @@ export default function Calculator() {
         return bonus;
       };
 
-      // No prayer mapping needed - pass prayers directly
-
       // Auto-detect combat type from equipped weapon and combat style
       const weapon = equipment.weapon;
       const weaponName = weapon?.name?.toLowerCase() || '';
@@ -230,36 +243,25 @@ export default function Calculator() {
           }, 0);
         };
 
+        // Apply defence prayer bonus to target's effective defence level
+        const PRAYER_DEF_BONUS = {
+          thick_skin: 105, rock_skin: 110, steel_skin: 115
+        };
+        const targetDefPrayer = targetLoadout.playerStats.prayerActive?.defence || 'none';
+        const targetDefPrayerMult = PRAYER_DEF_BONUS[targetDefPrayer] || 100;
+        const targetBaseDefence = targetLoadout.playerStats.boostedDefence || targetLoadout.playerStats.defence;
+        const targetEffectiveDefence = Math.floor(targetBaseDefence * targetDefPrayerMult / 100);
+
         targetStats = {
           hitpoints: targetLoadout.playerStats.hitpoints,
-          defence: targetLoadout.playerStats.defence,
-          defenceStab: getTargetDefBonus('defStab'),
-          defenceSlash: getTargetDefBonus('defSlash'),
-          defenceCrush: getTargetDefBonus('defCrush'),
-          defenceRanged: getTargetDefBonus('defRanged'),
-          defenceMagic: getTargetDefBonus('defMagic')
+          defence: targetEffectiveDefence,
+          defenceStab: getTargetDefBonus('defenceStab'),
+          defenceSlash: getTargetDefBonus('defenceSlash'),
+          defenceCrush: getTargetDefBonus('defenceCrush'),
+          defenceRanged: getTargetDefBonus('defenceRanged'),
+          defenceMagic: getTargetDefBonus('defenceMagic')
         };
-
-        console.log('=== PVP Mode Target Stats ===');
-        console.log('Target HP:', targetStats.hitpoints);
-        console.log('Target Defence Level:', targetStats.defence);
-        console.log('Target Defence Bonuses:', {
-          stab: targetStats.defenceStab,
-          slash: targetStats.defenceSlash,
-          crush: targetStats.defenceCrush,
-          ranged: targetStats.defenceRanged,
-          magic: targetStats.defenceMagic
-        });
       }
-
-      console.log('=== Sending to calculateDPS ===');
-      console.log('Combat Type:', detectedCombatType);
-      console.log('Attack Level:', playerStats.attack);
-      console.log('Strength Level:', playerStats.strength);
-      console.log('Ranged Level:', playerStats.ranged);
-      console.log('Magic Level:', playerStats.magic);
-      console.log('Attack Bonus:', attackBonus);
-      console.log('Attack Speed Ticks:', attackSpeedTicks);
 
       return await base44.functions.invoke('calculateDPS', {
         combatType: detectedCombatType,
@@ -349,8 +351,18 @@ export default function Calculator() {
     <div className="min-h-screen bg-gradient-to-b from-gray-900 to-gray-950">
       {/* Header */}
       <div className="bg-gray-950 border-b-2 border-amber-900 py-4 px-6">
-        <h1 className="text-3xl font-bold text-amber-600">2004 RuneScape DPS Calculator</h1>
-        <p className="text-amber-100 text-sm mt-1">Authentic 2004 formulas</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-amber-600">2004 RuneScape DPS Calculator</h1>
+            <p className="text-amber-100 text-sm mt-1">Authentic 2004 formulas</p>
+          </div>
+          <button
+            onClick={() => setShowOptimizer(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-amber-700 hover:bg-amber-600 border border-amber-600 rounded text-amber-100 font-semibold text-sm transition"
+          >
+            ✨ AI Optimizer
+          </button>
+        </div>
       </div>
 
       {/* Main Layout */}
@@ -394,7 +406,6 @@ export default function Calculator() {
 
             {/* Active Loadout */}
             {loadouts.filter(l => l.id === activeLoadoutId).map((loadout) => {
-              const activeIndex = loadouts.findIndex(l => l.id === activeLoadoutId);
               const otherLoadoutsWithNumbers = loadouts
                 .filter(l => l.id !== loadout.id)
                 .map((l, idx) => {
@@ -421,7 +432,7 @@ export default function Calculator() {
 
           {/* Middle Column - Monster */}
           <div className="lg:col-span-1">
-            <MonsterSelect selectedMonster={selectedMonster} onMonsterChange={setSelectedMonster} />
+            <MonsterSelect selectedMonster={selectedMonster} onMonsterChange={setSelectedMonster} onMonstersLoaded={setAvailableMonsters} />
           </div>
 
           {/* Right Column - Results */}
@@ -437,6 +448,20 @@ export default function Calculator() {
           </div>
         )}
       </div>
+
+      {/* AI Chat Modal */}
+      {showOptimizer && (
+        <AIChatModal
+          playerStats={loadouts.find(l => l.id === activeLoadoutId)?.playerStats}
+          monster={selectedMonster}
+          availableMonsters={availableMonsters}
+          loadouts={loadouts}
+          onApplyLoadout={applyOptimizerResult}
+          onSetMonster={setSelectedMonster}
+          onCreateLoadout={addLoadout}
+          onClose={() => setShowOptimizer(false)}
+        />
+      )}
 
       {/* Footer */}
       <div className="text-center py-6 mt-12 border-t border-amber-900">
